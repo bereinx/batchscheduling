@@ -1,0 +1,8 @@
+! AIMMS 4.7.2 text-first source bundle for refinery batch scheduling.
+! Add this file as the main model source and keep the relative folder layout.
+
+#include "src/Identifiers.ams"
+#include "src/MasterModel.ams"
+#include "src/Heuristics.ams"
+#include "src/Workflow.ams"
+
