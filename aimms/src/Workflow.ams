@@ -1,0 +1,95 @@
+DeclarationSection BatchSchedulingWorkflow {
+
+    StringParameter SolveStatus;
+    Parameter SolveObjectiveValue;
+
+    Procedure InitializeSettings {
+        Body : {
+            HorizonSlots   := HorizonDays * 24 / BatchHours;
+            StagesPerTank  := BatchesPerOrder / TanksPerOrder;
+            QCSlots        := ceil(QCHours / BatchHours);
+            OccupancySlots := BatchesPerOrder + QCSlots;
+            LastStartSlot  := HorizonSlots - OccupancySlots;
+
+            TankDeadstockMin(t) := TankCapacity(t) * DeadstockFraction;
+            DueHour(o)          := DueDay(o) * 24;
+            HalfVolume(o)       := Volume(o) / TanksPerOrder;
+            BatchVolume(o)      := Volume(o) / BatchesPerOrder;
+        }
+    }
+
+    Procedure ValidateInputs {
+        Body : {
+            if card(Orders) = 0 then
+                raise error "At least one order is required.";
+            endif;
+
+            if card(Components) = 0 then
+                raise error "At least one blendstock component is required.";
+            endif;
+
+            if card(Tanks) = 0 then
+                raise error "At least one product tank is required.";
+            endif;
+
+            if TanksPerOrder <= 0 then
+                raise error "TanksPerOrder must be positive.";
+            endif;
+
+            if BatchesPerOrder mod TanksPerOrder <> 0 then
+                raise error "BatchesPerOrder must be divisible by TanksPerOrder.";
+            endif;
+
+            if LastStartSlot < 0 then
+                raise error "The planning horizon is shorter than one campaign.";
+            endif;
+        }
+    }
+
+    Procedure SolveMasterMIP {
+        Body : {
+            option mip_relative_optimality_tolerance := MipGapRel;
+            option time_limit := SolverTimeLimitSec;
+
+            solve MasterBatchSchedule;
+
+            SolveStatus         := ProgramStatus;
+            SolveObjectiveValue := TotalCost;
+        }
+    }
+
+    Procedure SolveBatchScheduling {
+        Body : {
+            InitializeSettings;
+            ValidateInputs;
+
+            SolveMasterMIP;
+
+            if SolveStatus <> "Optimal" and SolveStatus <> "Feasible" then
+                return;
+            endif;
+
+            BuildMasterSolutionSnapshot;
+            InitializeHeelState;
+            ResetConsumedInventory;
+
+            ApplyLocalTankResequence;
+            ApplyQCReschedule;
+            RefineDeadstockPlan;
+            RepairInventoryShortages;
+            RebuildProfiles;
+        }
+    }
+
+    Procedure LoadExampleDefaults {
+        Body : {
+            ! This is the AIMMS-side entry point for loading the same kind of
+            ! sample case that currently exists in sample_data.py.
+            !
+            ! Recommended approach:
+            ! - export the existing Excel template sheets to CSV or direct AIMMS data pages,
+            ! - load them here,
+            ! - then call InitializeSettings and SolveBatchScheduling.
+        }
+    }
+}

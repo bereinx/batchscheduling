@@ -1,0 +1,193 @@
+DeclarationSection BatchSchedulingMasterModel {
+
+    Variable Start(o, sl) {
+        Range      : binary;
+        Definition : 0;
+    }
+
+    Variable UseTank(o, t, sl) {
+        Range      : binary;
+        Definition : 0;
+    }
+
+    Variable BatchQty(o, tg, st, c) {
+        Range      : nonnegative;
+        Definition : 0;
+    }
+
+    Variable SpecSlack(o, tg, st, sp) {
+        Range      : nonnegative;
+        Definition : 0;
+    }
+
+    Variable InventorySlack(c) {
+        Range      : nonnegative;
+        Definition : 0;
+    }
+
+    Variable TankCapacitySlack(o, sl) {
+        Range      : nonnegative;
+        Definition : 0;
+    }
+
+    Variable TardyHours(o) {
+        Range      : nonnegative;
+        Definition : 0;
+    }
+
+    Variable BlendCost {
+        Range      : free;
+        Definition : sum((o, tg, st, c), CostPerM3(c) * BatchQty(o, tg, st, c));
+    }
+
+    Variable DemurrageCost {
+        Range      : free;
+        Definition : sum(o | OrderMarketType(o) = "EXPORT", DemurragePerHour(o) * TardyHours(o));
+    }
+
+    Variable DomesticLateCost {
+        Range      : free;
+        Definition : sum(o | OrderMarketType(o) = "DOMESTIC", DomesticLatePenalty * TardyHours(o));
+    }
+
+    Variable SpecSlackCost {
+        Range      : free;
+        Definition : sum((o, tg, st, sp), SpecWeight(sp) * SpecSlack(o, tg, st, sp) * st * BatchVolume(o));
+    }
+
+    Variable InventorySlackCost {
+        Range      : free;
+        Definition : InventorySlackPenalty * sum(c, InventorySlack(c));
+    }
+
+    Variable TankCapacitySlackCost {
+        Range      : free;
+        Definition : HardSlackPenalty * sum((o, sl) | CandidateStart(o, sl), TankCapacitySlack(o, sl));
+    }
+
+    Variable TotalCost {
+        Range      : free;
+        Definition : BlendCost + DemurrageCost + DomesticLateCost + SpecSlackCost + InventorySlackCost + TankCapacitySlackCost;
+    }
+
+    Constraint ObjectiveDef {
+        Definition : TotalCost = BlendCost + DemurrageCost + DomesticLateCost + SpecSlackCost + InventorySlackCost + TankCapacitySlackCost;
+    }
+
+    Constraint OneStartPerOrder(o) {
+        Definition : sum(sl | CandidateStart(o, sl), Start(o, sl)) = 1;
+    }
+
+    Constraint SelectExactTankCount(o, sl) {
+        Definition : {
+            sum(t | CompatibleTank(o, t), UseTank(o, t, sl))
+            = TanksPerOrder * Start(o, sl)
+        }
+    }
+
+    Constraint TankCapacityCoverage(o, sl) {
+        Definition : {
+            sum(t | CompatibleTank(o, t), TankCapacity(t) * UseTank(o, t, sl))
+            + TankCapacitySlack(o, sl)
+            >= Volume(o) * Start(o, sl)
+        }
+    }
+
+    Constraint TankUseOnlyIfStart(o, t, sl) {
+        Definition : UseTank(o, t, sl) <= Start(o, sl);
+    }
+
+    Constraint FixedBatchVolume(o, tg, st) {
+        Definition : sum(c, BatchQty(o, tg, st, c)) = BatchVolume(o);
+    }
+
+    Constraint RonSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompRon(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            + SpecSlack(o, tg, st, 'ron_short') * st * BatchVolume(o)
+            >= RelaxedRonMin(o, st) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint RvpSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompRvp(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            <= (RelaxedRvpMax(o, st) + SpecSlack(o, tg, st, 'rvp_excess')) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint DensityMinSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompDensity(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            + SpecSlack(o, tg, st, 'density_low') * st * BatchVolume(o)
+            >= RelaxedDensityMin(o, st) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint DensityMaxSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompDensity(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            <= (RelaxedDensityMax(o, st) + SpecSlack(o, tg, st, 'density_high')) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint SulfurSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompSulfur(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            <= (RelaxedSulfurMax(o, st) + SpecSlack(o, tg, st, 'sulfur_excess')) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint OlefinSpec(o, tg, st) {
+        Definition : {
+            sum(c, CompOlefin(c) * sum(st2 | ord(st2) <= ord(st), BatchQty(o, tg, st2, c)))
+            <= (RelaxedOlefinMax(o, st) + SpecSlack(o, tg, st, 'olefin_excess')) * st * BatchVolume(o)
+        }
+    }
+
+    Constraint TardinessLowerBound(o) {
+        Definition : {
+            TardyHours(o) >= sum(sl | CandidateStart(o, sl),
+                max(0, CompletionHourByStart(sl) - DueHour(o)) * Start(o, sl))
+        }
+    }
+
+    Constraint SingleBlenderPerService(srv, sl) {
+        Definition : {
+            sum((o, sl2) |
+                OrderService(o) = srv
+                and CandidateStart(o, sl2)
+                and sl2 <= sl
+                and sl < sl2 + BatchesPerOrder,
+                Start(o, sl2))
+            <= 1
+        }
+    }
+
+    Constraint SingleTankOccupancy(t, sl) {
+        Definition : {
+            sum((o, sl2) |
+                CompatibleTank(o, t)
+                and CandidateStart(o, sl2)
+                and sl2 <= sl
+                and sl < sl2 + OccupancySlots,
+                UseTank(o, t, sl2))
+            <= 1
+        }
+    }
+
+    Constraint InventoryBound(c) {
+        Definition : {
+            sum((o, tg, st), BatchQty(o, tg, st, c))
+            <= AvailableComponentHorizon(c) + InventorySlack(c)
+        }
+    }
+
+    MathematicalProgram MasterBatchSchedule {
+        Objective   : TotalCost;
+        Direction   : minimize;
+        Constraints : AllConstraints;
+        Variables   : AllVariables;
+        Type        : MIP;
+    }
+}

@@ -1,0 +1,142 @@
+DeclarationSection BatchSchedulingHeuristics {
+
+    Parameter ServiceSequencePosition(o);
+    Parameter LocalResequenceAccepted(o);
+
+    Parameter TankHeelVolume(t);
+    Parameter TankHeelRon(t);
+    Parameter TankHeelRvp(t);
+    Parameter TankHeelDensity(t);
+    Parameter TankHeelSulfur(t);
+    Parameter TankHeelOlefin(t);
+
+    Parameter ComponentConsumedSoFar(c);
+    Parameter ComponentAvailableNow(c);
+    Parameter ComponentOverflowBefore(c);
+
+    Parameter RefineQty(t, o, st, c);
+    Parameter RefineSpecSlack(t, o, st, sp);
+    Parameter RefineInventorySlack(t, o, c);
+
+    Parameter CurrentGroupFirstHour;
+    Parameter CurrentGroupStages;
+    Parameter CurrentGroupBatchVolume;
+    Parameter CurrentGroupTotalVolume;
+
+    Procedure InitializeHeelState {
+        Body : {
+            TankHeelVolume(t)  := InitialTankVolume(t);
+            TankHeelRon(t)     := InitialTankRon(t);
+            TankHeelRvp(t)     := InitialTankRvp(t);
+            TankHeelDensity(t) := InitialTankDensity(t);
+            TankHeelSulfur(t)  := InitialTankSulfur(t);
+            TankHeelOlefin(t)  := InitialTankOlefin(t);
+        }
+    }
+
+    Procedure ResetConsumedInventory {
+        Body : {
+            ComponentConsumedSoFar(c) := 0;
+        }
+    }
+
+    Procedure BuildMasterSolutionSnapshot {
+        Body : {
+            ChosenStartSlot(o) := sum(sl | CandidateStart(o, sl), sl * Start(o, sl));
+            TardyHourResult(o) := TardyHours(o);
+            AssignedTank(o, tg, t) := 0;
+
+            ! In Python the selected tanks are recovered from UseTank and then ordered into tank groups.
+            ! In AIMMS this should be implemented via a deterministic assignment routine after the MIP solve.
+        }
+    }
+
+    Procedure ApplyLocalTankResequence {
+        Body : {
+            ! AIMMS equivalent of optimizer.py::_apply_local_tank_resequence
+            !
+            ! Recommended implementation:
+            ! 1. Process each service independently.
+            ! 2. Sort campaigns by ChosenStartSlot(o).
+            ! 3. Evaluate feasible tank pairs / tank combinations.
+            ! 4. Penalize carryover incompatibility, waiting time, and late completion.
+            ! 5. Write the accepted tank assignment back to AssignedTank(o, tg, t).
+            !
+            ! This package keeps the interface and state variables ready,
+            ! but the detailed scoring procedure should be implemented
+            ! directly in AIMMS for the target project.
+        }
+    }
+
+    Procedure ApplyQCReschedule {
+        Body : {
+            ! AIMMS equivalent of optimizer.py::_reschedule_batches_with_qc
+            !
+            ! Business rule:
+            ! - For the same product tank, the next batch cannot begin until
+            !   the previous batch blend time finishes and the 8h QC hold is complete.
+            ! - Different products may still run on other tanks.
+            ! - If the same blender is reused, maintain the configured minimum gap.
+            !
+            ! Populate:
+            !   BatchStartHour(o, tg, st)
+            !   BatchFinishHour(o, tg, st)
+        }
+    }
+
+    Procedure ComputeCurrentAvailability {
+        Body : {
+            ComponentAvailableNow(c) :=
+                InitialInventory(c)
+                + RundownPerHour(c) * CurrentGroupFirstHour
+                - ComponentConsumedSoFar(c);
+
+            ComponentOverflowBefore(c) :=
+                max(0, ComponentAvailableNow(c) - MaxInventory(c));
+        }
+    }
+
+    Procedure RefineDeadstockPlan {
+        Body : {
+            ! AIMMS equivalent of deadstock_heuristic.py::refine_deadstock_plan
+            !
+            ! For each chronological (tank, order) group:
+            ! 1. Read current heel state from TankHeel*.
+            ! 2. Compute component availability at the first batch start.
+            ! 3. Solve a small LP with:
+            !    - stage x component refine quantities,
+            !    - stage x spec slack,
+            !    - component inventory slack.
+            ! 4. Update:
+            !    - batch recipe,
+            !    - actual blended properties,
+            !    - heel state after discharge to deadstock,
+            !    - component consumption.
+            !
+            ! Recommended AIMMS implementation detail:
+            ! declare a second mathematical program for the per-group LP
+            ! and solve it inside a loop over tank-order groups.
+        }
+    }
+
+    Procedure RepairInventoryShortages {
+        Body : {
+            ! AIMMS equivalent of optimizer.py::_repair_inventory_shortages
+            !
+            ! Suggested logic:
+            ! - scan inventory trajectories over time,
+            ! - identify the first time a component becomes negative,
+            ! - find campaigns consuming the stressed component near that time,
+            ! - push those campaigns later by one day or one slot block,
+            ! - rerun QC reschedule and deadstock refinement,
+            ! - stop when no shortage remains or after max iterations.
+        }
+    }
+
+    Procedure RebuildProfiles {
+        Body : {
+            ! Recompute InventoryProfile(c, sl) and TankLevelProfile(t, sl)
+            ! after the final repaired schedule has been produced.
+        }
+    }
+}

@@ -1,0 +1,216 @@
+DeclarationSection BatchSchedulingData {
+
+    Set Orders {
+        Index      : o;
+        Definition : data { };
+    }
+
+    Set Components {
+        Index      : c;
+        Definition : data { };
+    }
+
+    Set Tanks {
+        Index      : t;
+        Definition : data { };
+    }
+
+    Set Services {
+        Index      : srv;
+        Definition : {
+            data { 'EXPORT_LS', 'EXPORT_HS', 'DOMESTIC_LS', 'DOMESTIC_HS' }
+        }
+    }
+
+    Set SpecNames {
+        Index      : sp;
+        Definition : {
+            data {
+                'ron_short',
+                'rvp_excess',
+                'density_low',
+                'density_high',
+                'sulfur_excess',
+                'olefin_excess'
+            }
+        }
+    }
+
+    Set TankGroups {
+        Index      : tg;
+        Definition : {
+            data { 1 .. max(1, round(TanksPerOrder, 0, downward)) }
+        }
+    }
+
+    Set Stages {
+        Index      : st;
+        Definition : {
+            data { 1 .. max(1, round(StagesPerTank, 0, downward)) }
+        }
+    }
+
+    Set Slots {
+        Index      : sl;
+        Definition : {
+            data { 0 .. max(0, round(HorizonSlots, 0, downward) - 1) }
+        }
+    }
+
+    Subset CompatibleTank(o, t) {
+        Definition : TankService(t) = OrderService(o);
+    }
+
+    Subset CandidateStart(o, sl) {
+        Definition : sl <= LastStartSlot;
+    }
+
+    Parameter ScheduleStartSerial;
+    Parameter ScheduleEndSerial;
+
+    Parameter BatchHours;
+    Parameter HorizonDays;
+    Parameter HorizonSlots;
+    Parameter BatchesPerOrder;
+    Parameter TanksPerOrder;
+    Parameter StagesPerTank;
+    Parameter QCHours;
+    Parameter QCSlots;
+    Parameter OccupancySlots;
+    Parameter LastStartSlot;
+    Parameter SolverTimeLimitSec;
+    Parameter MipGapRel;
+    Parameter BaseSpecPenalty;
+    Parameter HardSlackPenalty;
+    Parameter InventorySlackPenalty;
+    Parameter KeySpecMultiplier;
+    Parameter DomesticLatePenalty;
+    Parameter InterimRelaxPct;
+    Parameter DeadstockFraction;
+    Parameter MinBlenderGapHours;
+
+    Parameter OrderService(o) {
+        Range : Services;
+    }
+
+    Parameter OrderMarketType(o);
+    Parameter OrderSulfurClass(o);
+    Parameter GradeName(o);
+    Parameter Region(o);
+    Parameter DisplayCode(o);
+
+    Parameter DueDay(o);
+    Parameter DueHour(o);
+    Parameter Volume(o);
+    Parameter HalfVolume(o);
+    Parameter BatchVolume(o);
+
+    Parameter RonMin(o);
+    Parameter RvpMax(o);
+    Parameter DensityMin(o);
+    Parameter DensityMax(o);
+    Parameter SulfurMax(o);
+    Parameter OlefinMax(o);
+    Parameter DemurragePerHour(o);
+
+    Parameter TankService(t) {
+        Range : Services;
+    }
+
+    Parameter TankCapacity(t);
+    Parameter TankDeadstockMin(t);
+    Parameter InitialTankVolume(t);
+    Parameter InitialTankRon(t);
+    Parameter InitialTankRvp(t);
+    Parameter InitialTankDensity(t);
+    Parameter InitialTankSulfur(t);
+    Parameter InitialTankOlefin(t);
+
+    Parameter CompRon(c);
+    Parameter CompRvp(c);
+    Parameter CompDensity(c);
+    Parameter CompSulfur(c);
+    Parameter CompOlefin(c);
+    Parameter CostPerM3(c);
+    Parameter InitialInventory(c);
+    Parameter RundownPerHour(c);
+    Parameter MaxInventory(c);
+
+    Parameter SpecWeight(sp) {
+        Definition : {
+            if      sp = 'ron_short'     then BaseSpecPenalty * KeySpecMultiplier
+            elseif  sp = 'rvp_excess'    then BaseSpecPenalty * KeySpecMultiplier
+            elseif  sp = 'density_low'   then BaseSpecPenalty
+            elseif  sp = 'density_high'  then BaseSpecPenalty
+            elseif  sp = 'sulfur_excess' then BaseSpecPenalty * KeySpecMultiplier
+            else                              BaseSpecPenalty
+            endif
+        }
+    }
+
+    Parameter IsFinalStage(st) {
+        Definition : st = last(Stages);
+    }
+
+    Parameter RelaxedRonMin(o, st) {
+        Definition : if IsFinalStage(st) then RonMin(o) else RonMin(o) * (1 - InterimRelaxPct) endif;
+    }
+
+    Parameter RelaxedRvpMax(o, st) {
+        Definition : if IsFinalStage(st) then RvpMax(o) else RvpMax(o) * (1 + InterimRelaxPct) endif;
+    }
+
+    Parameter RelaxedDensityMin(o, st) {
+        Definition : if IsFinalStage(st) then DensityMin(o) else DensityMin(o) * (1 - InterimRelaxPct) endif;
+    }
+
+    Parameter RelaxedDensityMax(o, st) {
+        Definition : if IsFinalStage(st) then DensityMax(o) else DensityMax(o) * (1 + InterimRelaxPct) endif;
+    }
+
+    Parameter RelaxedSulfurMax(o, st) {
+        Definition : if IsFinalStage(st) then SulfurMax(o) else SulfurMax(o) * (1 + InterimRelaxPct) endif;
+    }
+
+    Parameter RelaxedOlefinMax(o, st) {
+        Definition : if IsFinalStage(st) then OlefinMax(o) else OlefinMax(o) * (1 + InterimRelaxPct) endif;
+    }
+
+    Parameter SlotHour(sl) {
+        Definition : sl * BatchHours;
+    }
+
+    Parameter CompletionHourByStart(sl) {
+        Definition : (sl + OccupancySlots) * BatchHours;
+    }
+
+    Parameter AvailableComponentHorizon(c) {
+        Definition : InitialInventory(c) + RundownPerHour(c) * HorizonDays * 24;
+    }
+}
+
+DeclarationSection BatchSchedulingResults {
+
+    Parameter ChosenStartSlot(o);
+    Parameter TardyHourResult(o);
+    Parameter AssignedTank(o, tg, t);
+
+    Parameter BatchStartHour(o, tg, st);
+    Parameter BatchFinishHour(o, tg, st);
+
+    Parameter HeelVolume(o, tg, st);
+    Parameter HeelRon(o, tg, st);
+    Parameter HeelRvp(o, tg, st);
+    Parameter HeelDensity(o, tg, st);
+    Parameter HeelSulfur(o, tg, st);
+    Parameter HeelOlefin(o, tg, st);
+
+    Parameter ActualRon(o, tg, st);
+    Parameter ActualRvp(o, tg, st);
+    Parameter ActualDensity(o, tg, st);
+    Parameter ActualSulfur(o, tg, st);
+    Parameter ActualOlefin(o, tg, st);
+
+    Parameter InventoryProfile(c, sl);
+    Parameter TankLevelProfile(t, sl);
+}
