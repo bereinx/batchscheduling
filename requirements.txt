@@ -1,0 +1,5 @@
+streamlit>=1.50,<2
+pandas>=2.3,<3
+altair>=5.0,<6
+pulp>=2.8,<3
+highspy>=1.14,<2
